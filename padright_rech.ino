@@ -2,19 +2,17 @@
 #include <LiquidCrystal_I2C.h>
 #include <SPI.h>
 #include <MFRC522.h>
+#include "PinChangeInterrupt.h"
 
 //-----
 #define RST_PIN 9 // Configurable, see typical pin layout above
 #define SS_PIN 10 // Configurable, see typical pin layout above
 
 MFRC522 mfrc522(SS_PIN, RST_PIN); // Create MFRC522 instance.
-
 MFRC522::MIFARE_Key key;
 MFRC522::StatusCode rfidstatus;
 
-//---
-
-LiquidCrystal_I2C lcd(0x27, 16, 2);
+LiquidCrystal_I2C lcd(0x27, 16, 2); // instance for 16*2 i2c lcd
 
 // --------regarding rfid card
 int blockAddr = 2;
@@ -24,6 +22,15 @@ int authAddr = 3;
 byte byteSize = sizeof(readByte);
 
 //---
+byte padQuantity = 0;
+int i = 0;
+int pinAstateCurrent = LOW; // Current state of Pin A
+int pinAStateLast = pinAstateCurrent;
+int pinA = 16; // Rotary encoder Pin A
+int pinB = 17;
+int switchPin = 3;
+byte buzzer = 8;
+//------------
 byte arrow[8] = {
     0b00000,
     0b11100,
@@ -34,102 +41,278 @@ byte arrow[8] = {
     0b11100,
     0b00000};
 
+void setup()
+{
+  Serial.begin(9600);
+  lcd.init(); // initialize the lcd
+  lcd.backlight();
+  lcd.createChar(0, arrow);
+  SPI.begin();                      // Init SPI bus
+  mfrc522.PCD_Init();               // Init MFRC522 card
+  pinMode(switchPin, INPUT_PULLUP); // Enable the switchPin as input with a PULLUP resistor
+  pinMode(pinA, INPUT);             // Set PinA as input
+  pinMode(pinB, INPUT);
+  pinMode(buzzer, OUTPUT);
 
-void setup(){
-Serial.begin(9600);
-    lcd.init(); // initialize the lcd
-    lcd.backlight();
-    lcd.createChar(0, arrow);
-    SPI.begin();        // Init SPI bus
-    mfrc522.PCD_Init(); // Init MFRC522 card
-
-      for (byte i = 0; i < 6; i++)
-    {
-        key.keyByte[i] = 0xFF;
-    }
-    startMessage();
-
+  for (byte i = 0; i < 6; i++)
+  {
+    key.keyByte[i] = 0xFF;
+  }
+  attachPCINT(digitalPinToPCINT(pinB), update, CHANGE);
+  startMessage();
 }
 void startMessage()
 {
-    lcd.clear();
-    lcd.setCursor(3, 0);
-    lcd.print("Powered By");
-    lcd.setCursor(2, 1);
-    lcd.print("Kaicho Group");
-    delay(3000);
-    lcd.clear();
-    lcd.setCursor(6, 0);
-    lcd.print("RED");
-    lcd.setCursor(5, 1);
-    lcd.print("INT'L");
-    delay(5000);
-    lcd.clear();
-    lcd.setCursor(2, 0);
-    lcd.print("Pad Vending");    
-    lcd.setCursor(2, 1);
-    lcd.print("RFID Recharger");    
-    delay(2000);
+  lcd.clear();
+  lcd.setCursor(4, 0);
+  lcd.print("Welcome");
+  lcd.setCursor(1, 1);
+  lcd.print("Pad Recharger");
+  delay(3000);
+  homepage();
 }
-void loop(){
+void loop()
+{
+  padQuantity = 1;
+  if (mfrc522.PICC_IsNewCardPresent())
+  {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Card Detected!");
+    lcd.setCursor(0, 1);
+    lcd.print("Please Wait.....");
+    success(500);
+    if (mfrc522.PICC_ReadCardSerial())
+    {
+      if (readCard())
+      {
+        if (readByte[0] == 107)
+        {
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print("Quantity left");
+          lcd.setCursor(0, 1);
+          lcd.print(readByte[15]);
+        }
+        else
+        {
+          lcd.clear();
+          lcd.setCursor(3, 0);
+          lcd.print("New Card");
+          lcd.setCursor(3, 1);
+          lcd.print("Detected!!");
+        }
+      }
+    }
+    delay(2000);
+    homepage();
+    halt();
+  }
 
+  if (!digitalRead(switchPin))
+  {
+    delay(800);
+    menuMessage(padQuantity);
+
+    while (digitalRead(switchPin))
+    {
+      if (i != 0)
+        menuManagement();
+    }
+    while (digitalRead(switchPin))
+      ;
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Show your card");
+    delay(2000);
+    saveData();
+    delay(2000);
+    homepage();
+  }
+}
+void homepage()
+{
+  lcd.clear();
+  lcd.setCursor(2, 0);
+  lcd.print("Pad Vending");
+  lcd.setCursor(1, 1);
+  lcd.print("RFID Recharger");
+}
+void menuManagement()
+{
+  if (readRotate() == 1)
+  {
+    if (padQuantity < 300)
+      padQuantity++;
+    menuMessage(padQuantity);
+  }
+  else if (readRotate() == 2)
+  {
+    if (padQuantity != 0)
+      padQuantity--;
+    menuMessage(padQuantity);
+  }
+  i = 0;
+}
+void menuMessage(int number)
+{
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print("Enter Quantity:");
+  lcd.setCursor(0, 1);
+  lcd.print(number);
 }
 
 bool readCard()
 {
-    byte buffersize = 18;
-    if (auth_A())
+  byte buffersize = 18;
+  if (auth_A())
+  {
+    rfidstatus = (MFRC522::StatusCode)mfrc522.MIFARE_Read(blockAddr, readByte, &buffersize);
+    if (rfidstatus != MFRC522::STATUS_OK)
     {
-        rfidstatus = (MFRC522::StatusCode)mfrc522.MIFARE_Read(blockAddr, readByte, &buffersize);
-        if (rfidstatus != MFRC522::STATUS_OK)
-        {
-            return false;
-        }
+      return false;
     }
-    return true;
+  }
+  return true;
 }
 bool writeCard()
 {
-    if (auth_B())
+  if (auth_B())
+  {
+    rfidstatus = (MFRC522::StatusCode)mfrc522.MIFARE_Write(blockAddr, writeByte, 16);
+    if (rfidstatus != MFRC522::STATUS_OK)
     {
-        rfidstatus = (MFRC522::StatusCode)mfrc522.MIFARE_Write(blockAddr, writeByte, 16);
-        if (rfidstatus != MFRC522::STATUS_OK)
-        {
-            return false;
-        }
+      return false;
     }
-    return true;
+  }
+  return true;
 }
 
 void dumpToWriteVar(byte *buffer, byte bufferSize)
 {
-    for (byte i = 0; i < bufferSize; i++)
-    {
-        Serial.print(buffer[i]);
-        writeByte[i] = buffer[i];
-    }
-    writeByte[15]--;
+  for (byte i = 0; i < bufferSize; i++)
+  {
+    Serial.print(buffer[i]);
+    writeByte[i] = buffer[i];
+  }
 }
 void halt()
 {
-    mfrc522.PICC_HaltA();      // Halt PICC
-    mfrc522.PCD_StopCrypto1(); // Stop encryption on PCD
+  mfrc522.PICC_HaltA();      // Halt PICC
+  mfrc522.PCD_StopCrypto1(); // Stop encryption on PCD
 }
 bool auth_A()
 {
-    rfidstatus = (MFRC522::StatusCode)mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, authAddr, &key, &(mfrc522.uid));
-    if (rfidstatus != MFRC522::STATUS_OK)
-    {
-        return false;
-    }
-    return true;
+  rfidstatus = (MFRC522::StatusCode)mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_A, authAddr, &key, &(mfrc522.uid));
+  if (rfidstatus != MFRC522::STATUS_OK)
+  {
+    return false;
+  }
+  return true;
 }
 bool auth_B()
 {
-    rfidstatus = (MFRC522::StatusCode)mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_B, authAddr, &key, &(mfrc522.uid));
-    if (rfidstatus != MFRC522::STATUS_OK)
-    {
-        return false;
+  rfidstatus = (MFRC522::StatusCode)mfrc522.PCD_Authenticate(MFRC522::PICC_CMD_MF_AUTH_KEY_B, authAddr, &key, &(mfrc522.uid));
+  if (rfidstatus != MFRC522::STATUS_OK)
+  {
+    return false;
+  }
+  return true;
+}
+void update()
+{
+  pinAstateCurrent = digitalRead(pinA); // Read the current state of Pin A
+  // If there is a minimal movement of 1 step
+  if ((pinAStateLast == LOW) && (pinAstateCurrent == HIGH))
+  {
+    if (digitalRead(pinB) == HIGH)
+    {        // If Pin B is HIGH
+      i = 1; // Print on screen
     }
-    return true;
+    else
+    {
+      i = 2; // Print on screen
+    }
+  }
+  pinAStateLast = pinAstateCurrent; // Store the latest read value in the currect state variable
+}
+int readRotate()
+{
+  if (i != 0 && i == 1)
+
+    return 1;
+
+  else if (i != 0 && i == 2)
+    return 2;
+}
+void saveData()
+{
+  if (mfrc522.PICC_IsNewCardPresent())
+  {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Card Detected!");
+    lcd.setCursor(0, 1);
+    lcd.print("Please Wait.....");
+    success(500);
+    delay(1000);
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("Writing...");
+    lcd.setCursor(0, 1);
+    lcd.print("Please Wait...");
+    if (mfrc522.PICC_ReadCardSerial())
+    {
+      if (readCard())
+      {
+        dumpToWriteVar(readByte, 16);
+
+        if (padQuantity == 0)
+        {
+          writeByte[15] = padQuantity;
+          writeByte[0] = 'k';
+          writeCard();
+        }
+        else
+        {
+          writeByte[0] = 'k';
+          writeByte[15] += padQuantity;
+          writeCard();
+        }
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Success....");
+        lcd.setCursor(0, 1);
+        lcd.print("Thank you!!");
+        success(800);
+      }
+    }
+  }
+  else
+  {
+    lcd.clear();
+    lcd.setCursor(0, 0);
+    lcd.print("No card");
+    lcd.setCursor(0, 1);
+    lcd.print("Detected!");
+    error();
+  }
+  halt();
+}
+
+void success(int _time)
+{
+  digitalWrite(buzzer, HIGH);
+  delay(_time);
+  digitalWrite(buzzer, LOW);
+}
+void error(){
+  digitalWrite(buzzer, HIGH);
+  delay(400);
+  digitalWrite(buzzer, LOW);
+  delay(400);
+  digitalWrite(buzzer, HIGH);
+  delay(400);
+  digitalWrite(buzzer, LOW);
 }

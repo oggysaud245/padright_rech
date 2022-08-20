@@ -1,5 +1,6 @@
 {
     "configuration": "cpu=atmega328",
     "board": "arduino:avr:nano",
-    "sketch": "padright_rech.ino"
+    "sketch": "padright_rech.ino",
+    "port": "COM19"
 }
