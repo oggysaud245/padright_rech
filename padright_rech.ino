@@ -268,24 +268,35 @@ void saveData()
       {
         dumpToWriteVar(readByte, 16);
 
-        if (padQuantity == 0)
+        if (padQuantity == 0 && readByte[0] != 107)
         {
           writeByte[15] = padQuantity;
           writeByte[0] = 'k';
           writeCard();
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print("Success....");
+          lcd.setCursor(0, 1);
+          lcd.print("Thank you!!");
+          success(800);
+        }
+        else if (padQuantity != 0 && readByte[0] == 107)
+        {
+          writeByte[15] += padQuantity;
+          writeCard();
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print("Success....");
+          lcd.setCursor(0, 1);
+          lcd.print("Thank you!!");
+          success(800);
         }
         else
         {
-          writeByte[0] = 'k';
-          writeByte[15] += padQuantity;
-          writeCard();
+          lcd.clear();
+          lcd.setCursor(0, 0);
+          lcd.print("Card not match");
         }
-        lcd.clear();
-        lcd.setCursor(0, 0);
-        lcd.print("Success....");
-        lcd.setCursor(0, 1);
-        lcd.print("Thank you!!");
-        success(800);
       }
     }
   }
@@ -307,7 +318,8 @@ void success(int _time)
   delay(_time);
   digitalWrite(buzzer, LOW);
 }
-void error(){
+void error()
+{
   digitalWrite(buzzer, HIGH);
   delay(400);
   digitalWrite(buzzer, LOW);
