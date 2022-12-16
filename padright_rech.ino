@@ -22,24 +22,27 @@ int authAddr = 3;
 byte byteSize = sizeof(readByte);
 
 //---
-byte padQuantity = 0;
-int i = 0;
+byte padQuantity = 1;
+int i = 0;                  /// used for rotation detection
 int pinAstateCurrent = LOW; // Current state of Pin A
 int pinAStateLast = pinAstateCurrent;
-int pinA = 16; // Rotary encoder Pin A
-int pinB = 17;
-int switchPin = 3;
+int pinA = 17; // Rotary encoder Pin A
+int pinB = 16;
+int switchPin = 2;
 byte buzzer = 8;
+int batchState = 0; // 0 for nothing // 1 for single write // 2 for batch write
+uint32_t previousTime = 0;
 //------------
 byte arrow[8] = {
-    0b00000,
-    0b11100,
-    0b10010,
-    0b01001,
-    0b01001,
-    0b10010,
-    0b11100,
-    0b00000};
+  0b00000,
+  0b11100,
+  0b10010,
+  0b01001,
+  0b01001,
+  0b10010,
+  0b11100,
+  0b00000
+};
 
 void setup()
 {
@@ -73,7 +76,6 @@ void startMessage()
 }
 void loop()
 {
-  padQuantity = 1;
   if (mfrc522.PICC_IsNewCardPresent())
   {
     lcd.clear();
@@ -108,26 +110,72 @@ void loop()
     homepage();
     halt();
   }
-
-  if (!digitalRead(switchPin))
+  previousTime = millis();
+  while (!digitalRead(switchPin))
   {
-    delay(800);
-    menuMessage(padQuantity);
-
-    while (digitalRead(switchPin))
-    {
-      if (i != 0)
-        menuManagement();
+    if (millis() - previousTime >= 5000) {
+      batchState = 2;
+      success(500);
+      delay(500);
+//      Serial.println(batchState);
     }
-    while (digitalRead(switchPin))
-      ;
-    lcd.clear();
-    lcd.setCursor(0, 0);
-    lcd.print("Show your card");
-    delay(2000);
-    saveData();
-    delay(2000);
-    homepage();
+    else if (millis() - previousTime >= 1000) {
+      //previousTime = millis();
+      batchState = 1;
+//      Serial.println(batchState);
+    }
+  }
+
+  switch (batchState) {
+    case 1:
+      delay(400);
+      Notify("Normal Mode");
+      delay(2000);
+      menuMessage(padQuantity);
+
+      while (digitalRead(switchPin))
+      {
+        if (i != 0)
+          menuManagement();
+      }
+      while (digitalRead(switchPin))
+        ;
+      lcd.clear();
+      lcd.setCursor(0, 0);
+      lcd.print("Show your card");
+      delay(2000);
+      saveData();
+      delay(2000);
+      homepage();
+      batchState = 0;
+      break;
+    case 2:
+      delay(400);
+      Notify("Batch Mode: On"); /// message on display
+      delay(2000);
+      menuMessage(padQuantity); /// select quantity
+      while (digitalRead(switchPin))
+      {
+        if (i != 0)
+          menuManagement();
+      }
+      while (!digitalRead(switchPin));
+
+      while (digitalRead(switchPin) == HIGH)
+      {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Show your card");
+        delay(2000);
+        saveData();
+        delay(2000);
+      }
+      homepage();
+      batchState = 0;
+      break;
+    default:
+      break;
+
   }
 }
 void homepage()
@@ -142,7 +190,7 @@ void menuManagement()
 {
   if (readRotate() == 1)
   {
-    if (padQuantity < 300)
+    if (padQuantity < 100)
       padQuantity++;
     menuMessage(padQuantity);
   }
@@ -161,6 +209,13 @@ void menuMessage(int number)
   lcd.print("Enter Quantity:");
   lcd.setCursor(0, 1);
   lcd.print(number);
+}
+void Notify(String msg)
+{
+  lcd.clear();
+  lcd.setCursor(0, 0);
+  lcd.print(msg);
+  Serial.println("inside");
 }
 
 bool readCard()
@@ -189,7 +244,7 @@ bool writeCard()
   return true;
 }
 
-void dumpToWriteVar(byte *buffer, byte bufferSize)
+void dumpToWriteVar(byte * buffer, byte bufferSize)
 {
   for (byte i = 0; i < bufferSize; i++)
   {
@@ -227,7 +282,7 @@ void update()
   if ((pinAStateLast == LOW) && (pinAstateCurrent == HIGH))
   {
     if (digitalRead(pinB) == HIGH)
-    {        // If Pin B is HIGH
+    { // If Pin B is HIGH
       i = 1; // Print on screen
     }
     else
@@ -256,7 +311,7 @@ void saveData()
     lcd.setCursor(0, 1);
     lcd.print("Please Wait.....");
     success(500);
-    delay(1000);
+    delay(500);
     lcd.clear();
     lcd.setCursor(0, 0);
     lcd.print("Writing...");
@@ -282,7 +337,7 @@ void saveData()
         }
         else if (padQuantity != 0 && readByte[0] == 107)
         {
-          writeByte[15] += padQuantity;
+          writeByte[15] = padQuantity;
           writeCard();
           lcd.clear();
           lcd.setCursor(0, 0);
