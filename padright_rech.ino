@@ -2,6 +2,7 @@
 #include <LiquidCrystal_I2C.h>
 #include <SPI.h>
 #include <MFRC522.h>
+#include "PinChangeInterrupt.h"
 
 //-----
 #define RST_PIN 9 // Configurable, see typical pin layout above
@@ -42,23 +43,7 @@ byte arrow[8] = {
   0b11100,
   0b00000
 };
-void ICACHE_RAM_ATTR update()
-{
-  pinAstateCurrent = digitalRead(pinA); // Read the current state of Pin A
-  // If there is a minimal movement of 1 step
-  if ((pinAStateLast == LOW) && (pinAstateCurrent == HIGH))
-  {
-    if (digitalRead(pinB) == HIGH)
-    { // If Pin B is HIGH
-      i = 1; // Print on screen
-    }
-    else
-    {
-      i = 2; // Print on screen
-    }
-  }
-  pinAStateLast = pinAstateCurrent; // Store the latest read value in the currect state variable
-}
+
 void setup()
 {
   Serial.begin(9600);
@@ -76,7 +61,7 @@ void setup()
   {
     key.keyByte[i] = 0xFF;
   }
-  attachInterrupt(pinB, update, CHANGE);
+  attachPCINT(digitalPinToPCINT(pinB), update, CHANGE);
   startMessage();
 }
 void startMessage()
@@ -290,7 +275,23 @@ bool auth_B()
   }
   return true;
 }
-
+void update()
+{
+  pinAstateCurrent = digitalRead(pinA); // Read the current state of Pin A
+  // If there is a minimal movement of 1 step
+  if ((pinAStateLast == LOW) && (pinAstateCurrent == HIGH))
+  {
+    if (digitalRead(pinB) == HIGH)
+    { // If Pin B is HIGH
+      i = 1; // Print on screen
+    }
+    else
+    {
+      i = 2; // Print on screen
+    }
+  }
+  pinAStateLast = pinAstateCurrent; // Store the latest read value in the currect state variable
+}
 int readRotate()
 {
   if (i != 0 && i == 1)
